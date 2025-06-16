@@ -9,7 +9,7 @@ from functools import wraps
 
 # ========== CONFIG ==========
 OWNER_ID = 7208410467
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = "YOUR_BOT_TOKEN"  
 MAX_WARN = 3
 
 # ========== DATABASE SETUP ==========
@@ -111,7 +111,8 @@ async def eval_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @owner_only
 async def shutdown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Shutting down... 📴")
-    await context.bot.shutdown()
+    await context.application.shutdown()
+    await context.application.stop()
 
 # ========== ADMIN COMMANDS ==========
 async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -226,6 +227,9 @@ async def main():
     print("Bot running... ")
     await app.run_polling()
 
+# ========== ENTRY POINT ==========
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+    import sys
+    if sys.platform.startswith("win"):
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    asyncio.run(main())
