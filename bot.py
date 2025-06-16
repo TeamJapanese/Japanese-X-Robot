@@ -2,17 +2,16 @@ import asyncio
 import aiosqlite
 from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
+    Application, ApplicationBuilder, CommandHandler, MessageHandler,
     ChatMemberHandler, CallbackQueryHandler, filters, ContextTypes
 )
 from functools import wraps
 
-# ========== CONFIG ==========
 OWNER_ID = 7208410467
-TOKEN = "YOUR_BOT_TOKEN"  # Replace this with your bot token
+TOKEN = "YOUR_BOT_TOKEN"  # Replace with your bot token
 MAX_WARN = 3
 
-# ========== DATABASE SETUP ==========
+# ========== DATABASE ==========
 async def init_db():
     async with aiosqlite.connect("data.db") as db:
         await db.execute("""
@@ -21,15 +20,17 @@ async def init_db():
                 user_id INTEGER,
                 count INTEGER,
                 PRIMARY KEY(chat_id, user_id)
-            )""")
+            )
+        """)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS rules (
                 chat_id INTEGER PRIMARY KEY,
                 text TEXT
-            )""")
+            )
+        """)
         await db.commit()
 
-# ========== OWNER CHECK DECORATOR ==========
+# ========== OWNER DECORATOR ==========
 def owner_only(func):
     @wraps(func)
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
@@ -111,7 +112,8 @@ async def eval_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 @owner_only
 async def shutdown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Shutting down... 📴")
-    await context.application.stop()  # Stop safely without crashing the loop
+    await context.application.stop()
+    # Do not manually call shutdown or loop.close — run_polling handles it!
 
 # ========== ADMIN COMMANDS ==========
 async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -151,13 +153,10 @@ async def warn(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 DO UPDATE SET count = count + 1
             """, (update.effective_chat.id, user.id))
             await db.commit()
-
             cursor = await db.execute("SELECT count FROM warns WHERE chat_id=? AND user_id=?", (update.effective_chat.id, user.id))
             row = await cursor.fetchone()
             count = row[0] if row else 0
-
         await update.message.reply_text(f"{user.mention_html()} has been warned ({count}/{MAX_WARN})", parse_mode="HTML")
-
         if count >= MAX_WARN:
             await update.effective_chat.ban_member(user.id)
             await update.message.reply_text(f"{user.mention_html()} was auto-banned for reaching {MAX_WARN} warnings.", parse_mode="HTML")
@@ -181,13 +180,13 @@ async def resetwarn(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await db.commit()
         await update.message.reply_text(f"✅ Reset warnings for {user.mention_html()}.", parse_mode="HTML")
 
-# ========== WELCOME MESSAGE ==========
+# ========== WELCOME ==========
 async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     member = update.chat_member
     if member.new_chat_member.status == "member":
         await update.effective_chat.send_message(f"ようこそ {member.new_chat_member.user.mention_html()}！", parse_mode="HTML")
 
-# ========== UTILITY ==========
+# ========== UTILS ==========
 async def extract_user(update: Update):
     if update.message.reply_to_message:
         return update.message.reply_to_message.from_user
@@ -205,6 +204,7 @@ async def main():
     await init_db()
     app = ApplicationBuilder().token(TOKEN).build()
 
+    # Command Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("id", id_cmd))
@@ -220,12 +220,13 @@ async def main():
     app.add_handler(CommandHandler("shutdown", shutdown))
     app.add_handler(CommandHandler("button", button_cmd))
 
+    # Callback & ChatMember
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(ChatMemberHandler(welcome, ChatMemberHandler.CHAT_MEMBER))
 
-    print("Bot running... ")
+    print("Bot is running...")
     await app.run_polling()
 
-# Use asyncio.run to avoid loop errors
+# ========== RUN ==========
 if __name__ == "__main__":
     asyncio.run(main())
