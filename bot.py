@@ -2,16 +2,17 @@ import asyncio
 import aiosqlite
 from telegram import Update, ChatPermissions, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, ApplicationBuilder, CommandHandler, MessageHandler,
+    ApplicationBuilder, CommandHandler, MessageHandler,
     ChatMemberHandler, CallbackQueryHandler, filters, ContextTypes
 )
 from functools import wraps
 
+# ========== CONFIG ==========
 OWNER_ID = 7208410467
 TOKEN = "YOUR_BOT_TOKEN"  # Replace with your bot token
 MAX_WARN = 3
 
-# ========== DATABASE ==========
+# ========== DATABASE SETUP ==========
 async def init_db():
     async with aiosqlite.connect("data.db") as db:
         await db.execute("""
@@ -20,22 +21,19 @@ async def init_db():
                 user_id INTEGER,
                 count INTEGER,
                 PRIMARY KEY(chat_id, user_id)
-            )
-        """)
+            )""")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS rules (
                 chat_id INTEGER PRIMARY KEY,
                 text TEXT
-            )
-        """)
+            )""")
         await db.commit()
 
-# ========== OWNER DECORATOR ==========
+# ========== OWNER CHECK DECORATOR ==========
 def owner_only(func):
     @wraps(func)
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-        user_id = update.effective_user.id
-        if user_id != OWNER_ID:
+        if update.effective_user.id != OWNER_ID:
             await update.message.reply_text("🚫 Access Denied. Only the bot owner can use this command.")
             return
         return await func(update, context, *args, **kwargs)
@@ -56,18 +54,18 @@ Available Commands:
 /unmute @user - Unmute user
 /warn @user - Warn user
 /warns @user - Show user warnings
-/resetwarn @user - Reset user warnings
+/resetwarn @user - Reset warnings
 /rules - Show group rules
-/setrules <text> - Set custom rules (admin only)
-/button - Test button (fun feature)
+/setrules <text> - Set custom rules
+/button - Fun test button
 /eval <code> - Owner only
 /shutdown - Owner only
 """)
 
 async def id_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    cid = update.effective_chat.id
-    await update.message.reply_text(f"User ID: `{uid}`\nChat ID: `{cid}`", parse_mode="Markdown")
+    await update.message.reply_text(
+        f"User ID: `{update.effective_user.id}`\nChat ID: `{update.effective_chat.id}`", parse_mode="Markdown"
+    )
 
 async def rules_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     async with aiosqlite.connect("data.db") as db:
@@ -92,13 +90,11 @@ async def set_rules(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("Click Me", callback_data="clicked")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Press the button below!", reply_markup=reply_markup)
+    await update.message.reply_text("Press the button below!", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text("🎉 You clicked the button!")
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text("🎉 You clicked the button!")
 
 @owner_only
 async def eval_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -113,7 +109,6 @@ async def eval_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def shutdown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Shutting down... 📴")
     await context.application.stop()
-    # Do not manually call shutdown or loop.close — run_polling handles it!
 
 # ========== ADMIN COMMANDS ==========
 async def ban(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -137,7 +132,8 @@ async def unmute(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     user = await extract_user(update)
     if user:
-        await update.effective_chat.restrict_member(user.id, ChatPermissions(can_send_messages=True))
+        perms = ChatPermissions(can_send_messages=True)
+        await update.effective_chat.restrict_member(user.id, perms)
         await update.message.reply_text(f"Unmuted {user.mention_html()}", parse_mode="HTML")
 
 async def warn(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -156,10 +152,16 @@ async def warn(update: Update, context: ContextTypes.DEFAULT_TYPE):
             cursor = await db.execute("SELECT count FROM warns WHERE chat_id=? AND user_id=?", (update.effective_chat.id, user.id))
             row = await cursor.fetchone()
             count = row[0] if row else 0
-        await update.message.reply_text(f"{user.mention_html()} has been warned ({count}/{MAX_WARN})", parse_mode="HTML")
+
+        await update.message.reply_text(
+            f"{user.mention_html()} has been warned ({count}/{MAX_WARN})", parse_mode="HTML"
+        )
+
         if count >= MAX_WARN:
             await update.effective_chat.ban_member(user.id)
-            await update.message.reply_text(f"{user.mention_html()} was auto-banned for reaching {MAX_WARN} warnings.", parse_mode="HTML")
+            await update.message.reply_text(
+                f"{user.mention_html()} was auto-banned for reaching {MAX_WARN} warnings.", parse_mode="HTML"
+            )
 
 async def warns(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = await extract_user(update)
@@ -186,11 +188,9 @@ async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if member.new_chat_member.status == "member":
         await update.effective_chat.send_message(f"ようこそ {member.new_chat_member.user.mention_html()}！", parse_mode="HTML")
 
-# ========== UTILS ==========
+# ========== UTILITIES ==========
 async def extract_user(update: Update):
-    if update.message.reply_to_message:
-        return update.message.reply_to_message.from_user
-    return None
+    return update.message.reply_to_message.from_user if update.message.reply_to_message else None
 
 async def is_admin(update: Update):
     member = await update.effective_chat.get_member(update.effective_user.id)
@@ -204,7 +204,6 @@ async def main():
     await init_db()
     app = ApplicationBuilder().token(TOKEN).build()
 
-    # Command Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("id", id_cmd))
@@ -219,14 +218,11 @@ async def main():
     app.add_handler(CommandHandler("eval", eval_cmd))
     app.add_handler(CommandHandler("shutdown", shutdown))
     app.add_handler(CommandHandler("button", button_cmd))
-
-    # Callback & ChatMember
     app.add_handler(CallbackQueryHandler(button_callback))
     app.add_handler(ChatMemberHandler(welcome, ChatMemberHandler.CHAT_MEMBER))
 
-    print("Bot is running...")
+    print("Bot running...")
     await app.run_polling()
 
-# ========== RUN ==========
 if __name__ == "__main__":
     asyncio.run(main())
